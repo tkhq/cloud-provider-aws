@@ -57,6 +57,32 @@ func (i InstanceID) awsString() *string {
 //   - <awsInstanceId>
 type KubernetesInstanceID string
 
+// Region extracts the AWS region from the provider ID when it includes an AZ token.
+// It returns an empty string when the provider ID has no zone/region component.
+// The expected format is aws:///<az>/<instance-id>
+// For example: aws:///us-east-1d/i-016635e9d1e6b4066 returns "us-east-1"
+func (name KubernetesInstanceID) Region() (string, error) {
+	s := string(name)
+
+	if !strings.HasPrefix(s, "aws://") {
+		return "", fmt.Errorf("invalid prefix (%s): does not start with aws://", name)
+	}
+	url, err := url.Parse(s)
+	if err != nil {
+		return "", fmt.Errorf("unable to parse (%s): %w", name, err)
+	}
+	if url.Scheme != "aws" {
+		return "", fmt.Errorf("invalid scheme for AWS instance (%s)", name)
+	}
+
+	tokens := strings.Split(strings.Trim(url.Path, "/"), "/")
+	if len(tokens) < 2 {
+		return "", fmt.Errorf("invalid format (%s): not enough tokens", name)
+	}
+
+	return azToRegion(tokens[0])
+}
+
 // MapToAWSInstanceID extracts the InstanceID from the KubernetesInstanceID
 func (name KubernetesInstanceID) MapToAWSInstanceID() (InstanceID, error) {
 	s := string(name)
@@ -68,10 +94,10 @@ func (name KubernetesInstanceID) MapToAWSInstanceID() (InstanceID, error) {
 	}
 	url, err := url.Parse(s)
 	if err != nil {
-		return "", fmt.Errorf("Invalid instance name (%s): %v", name, err)
+		return "", fmt.Errorf("invalid instance name %q: %w", name, err)
 	}
 	if url.Scheme != "aws" {
-		return "", fmt.Errorf("Invalid scheme for AWS instance (%s)", name)
+		return "", fmt.Errorf("invalid scheme for AWS instance %q", name)
 	}
 
 	awsID := ""
@@ -84,7 +110,7 @@ func (name KubernetesInstanceID) MapToAWSInstanceID() (InstanceID, error) {
 	// We sanity check the resulting instance ID; the two known formats are
 	// i-12345678 and i-12345678abcdef01
 	if awsID == "" || !(awsInstanceRegMatch.MatchString(awsID) || variant.IsVariantNode(awsID)) {
-		return "", fmt.Errorf("Invalid format for AWS instance (%s)", name)
+		return "", fmt.Errorf("invalid format for AWS instance %q", name)
 	}
 
 	return InstanceID(awsID), nil
