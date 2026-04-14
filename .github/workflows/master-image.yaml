@@ -1,0 +1,54 @@
+name: Master Image
+
+on:
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: master-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.25.5"
+  GOPROXY: https://proxy.golang.org,direct
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/cloud-provider-aws
+  IMAGE_TAG: sha-${{ github.sha }}
+
+jobs:
+  build-and-publish:
+    name: Build And Publish Master Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check Out Repository
+        uses: actions/checkout@v5
+
+      - name: Build Controller Binary
+        run: make aws-cloud-controller-manager
+
+      - name: Set Up Docker Buildx
+        run: |
+          docker buildx create --name master-image-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+
+      - name: Log In To GHCR
+        env:
+          GHCR_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GHCR_PASSWORD}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build And Push Master Image
+        run: |
+          docker buildx build \
+            --file ./Dockerfile \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg GOPROXY="${{ env.GOPROXY }}" \
+            --build-arg VERSION="${{ env.IMAGE_TAG }}" \
+            --tag "${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}" \
+            --tag "${{ env.IMAGE_REPOSITORY }}:latest" \
+            --push \
+            .
