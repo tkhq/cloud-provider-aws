@@ -1,22 +1,19 @@
-name: PR CI
+name: Master Image
 
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
+  push:
+    branches:
+      - master
 
 concurrency:
-  group: pr-ci-${{ github.event.pull_request.number }}
+  group: master-image-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   GO_VERSION: "1.25.5"
   GOPROXY: https://proxy.golang.org,direct
   IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/cloud-provider-aws
-  IMAGE_TAG: pr-${{ github.event.pull_request.number }}
+  IMAGE_TAG: sha-${{ github.sha }}
   AWS_ACCESS_KEY_ID: test-access-key
   AWS_SECRET_ACCESS_KEY: test-secret-key
   AWS_SESSION_TOKEN: test-session-token
@@ -25,8 +22,8 @@ env:
   AWS_EC2_METADATA_DISABLED: "true"
 
 jobs:
-  pr-ci:
-    name: Test, Build, And Publish PR Image
+  build-and-publish:
+    name: Test, Build, And Publish Master Image
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -50,18 +47,16 @@ jobs:
 
       - name: Set Up Docker Buildx
         run: |
-          docker buildx create --name pr-ci-builder --driver docker-container --use
+          docker buildx create --name master-image-builder --driver docker-container --use
           docker buildx inspect --bootstrap
 
       - name: Log In To GHCR
-        if: github.event.pull_request.head.repo.full_name == github.repository
         env:
           GHCR_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "${GHCR_PASSWORD}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Build And Push PR Image
-        if: github.event.pull_request.head.repo.full_name == github.repository
+      - name: Build And Push Master Image
         run: |
           docker buildx build \
             --file ./Dockerfile \
@@ -69,9 +64,6 @@ jobs:
             --build-arg GOPROXY="${{ env.GOPROXY }}" \
             --build-arg VERSION="${{ env.IMAGE_TAG }}" \
             --tag "${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}" \
+            --tag "${{ env.IMAGE_REPOSITORY }}:latest" \
             --push \
             .
-
-      - name: Skip GHCR Push For Forked PRs
-        if: github.event.pull_request.head.repo.full_name != github.repository
-        run: echo "Skipping GHCR push for forked pull request because the workflow token does not have package write access."
