@@ -94,14 +94,14 @@ func TestKubernetesInstanceIDRegion(t *testing.T) {
 			expectedRegion: "us-west-2",
 		},
 		{
-			name:           "Should return empty region for providerID without zone",
-			providerID:     "aws:////i-abc",
-			expectedRegion: "",
+			name:        "Should error for providerID without zone",
+			providerID:  "aws:////i-abc",
+			expectError: true,
 		},
 		{
-			name:           "Should return empty region for bare instance ID",
-			providerID:     "i-abc",
-			expectedRegion: "",
+			name:        "Should error for bare instance ID",
+			providerID:  "i-abc",
+			expectError: true,
 		},
 		{
 			name:        "Should error for invalid aws zone token",
