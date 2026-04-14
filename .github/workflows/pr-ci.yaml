@@ -1,0 +1,77 @@
+name: PR CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: pr-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.25.5"
+  GOPROXY: https://proxy.golang.org,direct
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/cloud-provider-aws
+  IMAGE_TAG: pr-${{ github.event.pull_request.number }}
+  AWS_ACCESS_KEY_ID: test-access-key
+  AWS_SECRET_ACCESS_KEY: test-secret-key
+  AWS_SESSION_TOKEN: test-session-token
+  AWS_REGION: us-west-2
+  AWS_DEFAULT_REGION: us-west-2
+  AWS_EC2_METADATA_DISABLED: "true"
+
+jobs:
+  pr-ci:
+    name: Test, Build, And Publish PR Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check Out Repository
+        uses: actions/checkout@v5
+
+      - name: Set Up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run Unit Tests
+        run: make test
+
+      - name: Build Controller Binary
+        run: make aws-cloud-controller-manager
+
+      - name: Set Up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log In To GHCR
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build And Push PR Image
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            GOPROXY=${{ env.GOPROXY }}
+            VERSION=${{ env.IMAGE_TAG }}
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}
+
+      - name: Skip GHCR Push For Forked PRs
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: echo "Skipping GHCR push for forked pull request because the workflow token does not have package write access."
