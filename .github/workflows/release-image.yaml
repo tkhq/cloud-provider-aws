@@ -1,0 +1,80 @@
+name: Release Image
+
+on:
+  push:
+    branches:
+      - release-*
+  workflow_dispatch:
+    inputs:
+      release_branch:
+        description: Release branch to build
+        required: true
+        type: string
+
+concurrency:
+  group: release-image-${{ github.event_name == 'workflow_dispatch' && inputs.release_branch || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.25.5"
+  GOPROXY: https://proxy.golang.org,direct
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/cloud-provider-aws
+
+jobs:
+  build-and-publish:
+    name: Build And Publish Release Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Validate Manual Release Branch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          case "${{ inputs.release_branch }}" in
+            release-*) ;;
+            *)
+              echo "release_branch must start with 'release-'"
+              exit 1
+              ;;
+          esac
+
+      - name: Check Out Repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_branch || github.ref }}
+
+      - name: Determine Image Metadata
+        run: |
+          IMAGE_TAG="sha-$(git rev-parse HEAD)"
+          RELEASE_TAG="$(git describe --tags --abbrev=0 --match 'v*')"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> "${GITHUB_ENV}"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "${GITHUB_ENV}"
+
+      - name: Build Controller Binary
+        run: make aws-cloud-controller-manager
+
+      - name: Set Up Docker Buildx
+        run: |
+          docker buildx create --name release-image-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+
+      - name: Log In To GHCR
+        env:
+          GHCR_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GHCR_PASSWORD}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build And Push Release Image
+        run: |
+          docker buildx build \
+            --file ./Dockerfile \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg GOPROXY="${{ env.GOPROXY }}" \
+            --build-arg VERSION="${{ env.RELEASE_TAG }}" \
+            --tag "${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}" \
+            --tag "${{ env.IMAGE_REPOSITORY }}:${{ env.RELEASE_TAG }}" \
+            --push \
+            .
