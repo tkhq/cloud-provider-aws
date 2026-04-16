@@ -67,7 +67,7 @@ jobs:
             --file ./Dockerfile \
             --platform linux/amd64,linux/arm64 \
             --build-arg GOPROXY="${{ env.GOPROXY }}" \
-            --build-arg VERSION="${{ env.IMAGE_TAG }}" \
+            --build-arg VERSION="v0.0.0-${{ env.IMAGE_TAG }}" \
             --tag "${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}" \
             --push \
             .
